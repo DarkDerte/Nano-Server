@@ -1,3 +1,5 @@
+mod config;
+
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::collections::HashMap;
@@ -8,78 +10,13 @@ use std::net::TcpListener;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{fs::File, io::Read};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
-const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
-const MAX_HEADER_BYTES: usize = 32 * 1024;
-
-#[derive(Debug, Clone)]
-struct ConfigFile {
-    address: String,
-    cache_max_age_seconds: u64,
-    access_log: Option<PathBuf>,
-    tls_certificate: Option<PathBuf>,
-    tls_private_key: Option<PathBuf>,
-    sites: Vec<SiteFile>,
-    redirect_groups: Vec<RedirectGroup>,
-    mime_types: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone)]
-struct SiteFile {
-    host: String,
-    document_root: PathBuf,
-    index_file: String,
-    not_found_page: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone)]
-struct Site {
-    host: String,
-    document_root: PathBuf,
-    index_file: String,
-    not_found_page: Option<PathBuf>,
-    redirects: Vec<Redirect>,
-}
-
-#[derive(Debug, Clone)]
-struct RedirectGroup {
-    host: String,
-    redirects: Vec<RedirectFile>,
-}
-
-#[derive(Debug, Clone)]
-struct RedirectFile {
-    path: String,
-    target: String,
-    status: u16,
-}
-
-#[derive(Debug, Clone)]
-struct Redirect {
-    path: String,
-    target: String,
-    status: u16,
-}
-
-#[derive(Debug, Clone)]
-struct Config {
-    address: String,
-    cache_max_age_seconds: u64,
-    access_log: Option<PathBuf>,
-    tls: Option<TlsPaths>,
-    sites: Vec<Site>,
-    mime_types: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TlsPaths {
-    certificate: PathBuf,
-    private_key: PathBuf,
-}
+use crate::config::{
+    Config, ConfigFile, MAX_HEADER_BYTES, MAX_HEADER_LINE_BYTES, MAX_REQUEST_LINE_BYTES,
+    REQUEST_TIMEOUT, Redirect, RedirectFile, RedirectGroup, Site, SiteFile, TlsPaths,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = env::var_os("NANO_SERVER_CONFIG")
@@ -96,10 +33,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tls_config = load_tls_server_config(&config)?;
 
     let listener = TcpListener::bind(&config.address)?;
-    let scheme = if tls_config.is_some() { "https" } else { "http" };
+    let scheme = if tls_config.is_some() {
+        "https"
+    } else {
+        "http"
+    };
     println!(
         "Nano-Server serving {} site(s) at {scheme}://{}",
-        config.sites.len(), config.address
+        config.sites.len(),
+        config.address
     );
 
     for stream in listener.incoming() {
@@ -117,7 +59,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     updated_config.address = bound_address.clone();
                                 }
                                 if updated_config.tls != config.tls {
-                                    eprintln!("config reload: TLS certificate changes require restarting the server; keeping current TLS settings");
+                                    eprintln!(
+                                        "config reload: TLS certificate changes require restarting the server; keeping current TLS settings"
+                                    );
                                     updated_config.tls = config.tls.clone();
                                 }
                                 config = updated_config;
@@ -179,19 +123,18 @@ fn load_tls_server_config(
         return Ok(None);
     };
     let mut certificate_reader = BufReader::new(File::open(&paths.certificate)?);
-    let certificates = rustls_pemfile::certs(&mut certificate_reader)
-        .collect::<Result<Vec<_>, _>>()?;
+    let certificates =
+        rustls_pemfile::certs(&mut certificate_reader).collect::<Result<Vec<_>, _>>()?;
     if certificates.is_empty() {
         return Err(format!("no certificates found in {}", paths.certificate.display()).into());
     }
     let mut key_reader = BufReader::new(File::open(&paths.private_key)?);
     let private_key = rustls_pemfile::private_key(&mut key_reader)?
         .ok_or_else(|| format!("no private key found in {}", paths.private_key.display()))?;
-    let server_config = rustls::ServerConfig::builder_with_protocol_versions(&[
-        &rustls::version::TLS13,
-    ])
-    .with_no_client_auth()
-    .with_single_cert(certificates, private_key)?;
+    let server_config =
+        rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .with_no_client_auth()
+            .with_single_cert(certificates, private_key)?;
     Ok(Some(Arc::new(server_config)))
 }
 
@@ -360,7 +303,9 @@ fn parse_config(contents: &str) -> Result<ConfigFile, String> {
         let key = key.trim();
         let value = value.trim();
         if key.is_empty() || value.is_empty() {
-            return Err(format!("line {line_number}: key and value must not be empty"));
+            return Err(format!(
+                "line {line_number}: key and value must not be empty"
+            ));
         }
 
         let section = section.ok_or_else(|| {
@@ -387,9 +332,7 @@ fn parse_config(contents: &str) -> Result<ConfigFile, String> {
                         format!("line {line_number}: cache_max_age_seconds must be an integer")
                     })?;
                 }
-                "access_log" if value.eq_ignore_ascii_case("none") => {
-                    config.access_log = None
-                }
+                "access_log" if value.eq_ignore_ascii_case("none") => config.access_log = None,
                 "access_log" => config.access_log = Some(PathBuf::from(value)),
                 "tls_cert" => config.tls_certificate = Some(PathBuf::from(value)),
                 "tls_key" => config.tls_private_key = Some(PathBuf::from(value)),
@@ -409,7 +352,9 @@ fn parse_config(contents: &str) -> Result<ConfigFile, String> {
             }
             Section::Redirect(index) => {
                 if !key.starts_with('/') {
-                    return Err(format!("line {line_number}: redirect keys must start with /"));
+                    return Err(format!(
+                        "line {line_number}: redirect keys must start with /"
+                    ));
                 }
                 let (status, target) = if let Some(target) = value.strip_prefix("302 ") {
                     (302, target.trim())
@@ -418,13 +363,11 @@ fn parse_config(contents: &str) -> Result<ConfigFile, String> {
                 } else {
                     (301, value)
                 };
-                config.redirect_groups[index]
-                    .redirects
-                    .push(RedirectFile {
-                        path: key.to_owned(),
-                        target: target.to_owned(),
-                        status,
-                    });
+                config.redirect_groups[index].redirects.push(RedirectFile {
+                    path: key.to_owned(),
+                    target: target.to_owned(),
+                    status,
+                });
             }
             Section::Mime => {
                 let extension = key.trim_start_matches('.').to_ascii_lowercase();
@@ -639,7 +582,10 @@ fn read_bounded_line<R: BufRead>(
 
 fn is_http_token(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
-        || matches!(byte, b'!' | b'#'..=b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~')
+        || matches!(
+            byte,
+            b'!' | b'#'..=b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+        )
 }
 
 fn respond_bad_request<W: Write>(
@@ -731,11 +677,7 @@ fn serve_request<W: Write>(
                             )?;
                             return Ok(206);
                         }
-                        write_range_not_satisfiable(
-                            stream,
-                            contents.len(),
-                            method == "HEAD",
-                        )?;
+                        write_range_not_satisfiable(stream, contents.len(), method == "HEAD")?;
                         return Ok(416);
                     }
                 }
@@ -836,14 +778,7 @@ fn send_not_found<W: Write>(
         if let Some(path) = resolve_configured_page(&site.document_root, page) {
             if let Ok(contents) = fs::read(&path) {
                 let mime_type = content_type(&path, mime_types);
-                return write_response(
-                    stream,
-                    404,
-                    "Not Found",
-                    &mime_type,
-                    &contents,
-                    head_only,
-                );
+                return write_response(stream, 404, "Not Found", &mime_type, &contents, head_only);
             }
         }
     }
@@ -996,10 +931,7 @@ fn write_static_response<W: Write>(
     headers: &HashMap<String, String>,
     max_age_seconds: u64,
 ) -> io::Result<u16> {
-    let compressed = if body.len() >= 256
-        && is_compressible(mime_type)
-        && accepts_gzip(headers)
-    {
+    let compressed = if body.len() >= 256 && is_compressible(mime_type) && accepts_gzip(headers) {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(body)?;
         let encoded = encoder.finish()?;
@@ -1076,12 +1008,12 @@ fn is_compressible(mime_type: &str) -> bool {
 }
 
 fn if_none_match(headers: &HashMap<String, String>, etag: &str) -> bool {
-    headers
-        .get("if-none-match")
-        .is_some_and(|value| value.split(',').any(|candidate| {
+    headers.get("if-none-match").is_some_and(|value| {
+        value.split(',').any(|candidate| {
             let candidate = candidate.trim();
             candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == etag
-        }))
+        })
+    })
 }
 
 fn fnv1a64(bytes: &[u8]) -> u64 {

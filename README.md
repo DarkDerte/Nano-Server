@@ -75,3 +75,42 @@ Nano-Server vuelve a leer `config.ini` al recibir cada nueva conexi√≥n. Los camb
 ## Compresi√≥n y cach√©
 
 Los archivos de texto, HTML, CSS, JavaScript, JSON y SVG se comprimen con gzip cuando el cliente lo admite y la versi√≥n comprimida ocupa menos. Cada archivo est√°tico incluye un `ETag` y `Cache-Control`; los clientes pueden enviar `If-None-Match` para recibir `304 Not Modified` sin descargar el contenido otra vez. `cache_max_age_seconds` configura el tiempo de cach√© (por defecto, una hora). Las respuestas var√≠an seg√∫n `Accept-Encoding`.
+
+
+## CompilaciÛn para diferentes arquitecturas
+
+Nano-Server es portable y puede compilarse para m˙ltiples arquitecturas usando Rust.
+
+### Targets preinstalados
+
+Puedes listar los targets disponibles: 
+
+```powershell
+rustup target list --installed
+```
+
+### Compilar para un target especÌfico
+
+```sh
+cargo build --release --target x86_64-pc-windows-msvc
+cargo build --release --target x86_64-unknown-linux-gnu
+cargo build --release --target x86_64-unknown-linux-musl
+cargo build --release --target aarch64-unknown-linux-musl
+cargo build --release --target aarch64-apple-darwin
+cargo build --release --target x86_64-apple-darwin
+```
+
+Los binarios se generar·n en `target/<target>/release/`.
+
+### Instalar target nuevo
+
+```sh
+rustup target add <target>
+```
+
+### Notas de cross-compilation
+
+- Para Linux `musl`, el proyecto ya tiene configuraciÛn con `rust-lld`.
+- En Windows se usa `crt-static` para generar binarios autocontenidos.
+- Dependencias (`ring`, `rustls`) son compatibles multiplataforma. No hay dependencias nativas que bloqueen la compilaciÛn cruzada en la mayorÌa de targets comunes.
+- Para targets no nativos (ej. compilar Linux desde Windows), puede requerirse un linker adicional; en este entorno ya hay targets Linux instalados.
